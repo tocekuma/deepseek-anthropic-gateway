@@ -1,0 +1,17 @@
+{
+  "inferenceProvider": "gateway",
+  "inferenceGatewayBaseUrl": "http://127.0.0.1:8088",
+  "inferenceGatewayApiKey": "local-proxy-placeholder",
+  "inferenceModels": [
+    {
+      "name": "claude-opus-4-7",
+      "supports1m": true
+    },
+    {
+      "name": "claude-opus-4-7[1m]"
+    },
+    {
+      "name": "claude-sonnet-4-5"
+    }
+  ]
+}
