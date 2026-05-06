@@ -1,84 +1,237 @@
-# DeepSeek Anthropic Mapping Gateway
+# DeepSeek Anthropic Gateway
 
-本地小代理，用来给 Claude Desktop 提供一个 Anthropic-compatible 入口，再把模型映射到 DeepSeek。
+Make Claude Desktop speak Claude, while DeepSeek does the actual work.
 
-## 作用
+This is a tiny local gateway for Claude Desktop / Claude Code custom 3P setups. It exposes an Anthropic-compatible surface to the client, rewrites Claude-looking model names into DeepSeek model names, forces `effort=max`, and keeps a redacted request log so you can debug the chain without leaking prompts or API keys.
 
-- Claude Desktop 看到 `claude-opus-4-7` 和 `claude-sonnet-4-5`
-- 代理把 `claude-opus-4-7` 改写成 `deepseek-v4-pro[1m]`
-- 代理也接受 Claude Code 自动追加的 `claude-opus-4-7[1m]`
-- 代理把 `claude-sonnet-4-5` 改写成 `deepseek-v4-flash`
-- 代理强制把请求体里的 `effort` 设为 `max`
-- 再转发到 DeepSeek 的 Anthropic 兼容接口
+In short:
 
-## 环境变量
+```text
+Claude Desktop -> localhost gateway -> DeepSeek Anthropic-compatible API
+```
 
-- `GATEWAY_UPSTREAM_BASE_URL`：DeepSeek Anthropic endpoint，例如 `https://api.deepseek.com/anthropic`
-- `GATEWAY_UPSTREAM_API_KEY`：DeepSeek API key
-- `GATEWAY_LISTEN_HOST`：默认 `127.0.0.1`
-- `GATEWAY_LISTEN_PORT`：默认 `8088`
-- `GATEWAY_UPSTREAM_TIMEOUT_SECONDS`：默认 `30`
-- `GATEWAY_FORCE_EFFORT`：默认 `max`
-- `GATEWAY_MODEL_MAP_JSON`：可选，自定义模型映射 JSON
-- `GATEWAY_LOG_FILE`：可选，默认 `~/Library/Logs/Claude-3p/deepseek-gateway.log`
+## Why This Exists
 
-## 启动
+Claude Desktop may validate model names more strictly than your upstream provider expects. If the client wants to see Claude-style model IDs, but your backend wants DeepSeek model IDs, direct configuration can get awkward fast.
+
+This gateway sits in the middle and says:
+
+| Claude-facing route | Upstream model |
+| --- | --- |
+| `claude-opus-4-7` | `deepseek-v4-pro[1m]` |
+| `claude-opus-4-7[1m]` | `deepseek-v4-pro[1m]` |
+| `anthropic/claude-opus-4-7` | `deepseek-v4-pro[1m]` |
+| `anthropic/claude-opus-4-7[1m]` | `deepseek-v4-pro[1m]` |
+| `opus-4.7` | `deepseek-v4-pro[1m]` |
+| `opus-4.7[1m]` | `deepseek-v4-pro[1m]` |
+| `claude-sonnet-4-5` | `deepseek-v4-flash` |
+| `anthropic/claude-sonnet-4-5` | `deepseek-v4-flash` |
+| `sonnet-4.5` | `deepseek-v4-flash` |
+
+It also overwrites any incoming `effort` value with:
+
+```json
+{"effort":"max"}
+```
+
+Because if you asked for max, the client does not get a vote. Politely.
+
+## Features
+
+- Anthropic-compatible local endpoints for Claude Desktop / Claude Code
+- Model discovery via `GET /v1/models`
+- Model name rewriting before upstream forwarding
+- Forced `effort=max`
+- Redacted JSON Lines logs
+- No prompt logging
+- No API key logging
+- Pure Python standard library implementation
+
+## Quick Start
+
+Set your upstream endpoint and DeepSeek API key:
 
 ```bash
 export GATEWAY_UPSTREAM_BASE_URL="https://api.deepseek.com/anthropic"
-export GATEWAY_UPSTREAM_API_KEY="***"
-python3 tools/deepseek-anthropic-gateway/server.py
+export GATEWAY_UPSTREAM_API_KEY="YOUR_DEEPSEEK_API_KEY"
 ```
 
-先检查配置：
+Check the config:
 
 ```bash
-python3 tools/deepseek-anthropic-gateway/server.py --check-config
+python3 server.py --check-config
 ```
 
-## 日志
-
-gateway 会写 JSON Lines 格式的脱敏日志，默认位置：
+Start the gateway:
 
 ```bash
-tail -f "$HOME/Library/Logs/Claude-3p/deepseek-gateway.log"
+python3 server.py
 ```
 
-每条请求会记录：
+By default it listens on:
 
-- `method` / `path`
-- `client_model` / `upstream_model`
-- `forced_effort`
-- `status`
-- `duration_ms`
-- `error` / `upstream_error`
+```text
+http://127.0.0.1:8088
+```
 
-日志不会记录 API key，也不会记录用户 prompt 内容。
+Health check:
 
-## Claude Desktop 侧配置思路
+```bash
+curl http://127.0.0.1:8088/health
+```
 
-把 Claude Desktop 里 3P / gateway 的 base URL 指到本地代理：
+Expected:
+
+```json
+{"status":"ok"}
+```
+
+## Claude Desktop Config
+
+Point your Claude Desktop 3P / gateway config at the local server:
 
 ```json
 {
   "inferenceProvider": "gateway",
   "inferenceGatewayBaseUrl": "http://127.0.0.1:8088",
+  "inferenceGatewayApiKey": "local-placeholder-key",
+  "inferenceGatewayAuthScheme": "bearer",
   "inferenceModels": [
-    { "name": "claude-opus-4-7", "supports1m": true },
-    { "name": "claude-sonnet-4-5" }
+    {
+      "name": "claude-opus-4-7",
+      "supports1m": true
+    },
+    {
+      "name": "claude-sonnet-4-5"
+    }
   ]
 }
 ```
 
-## 当前支持
+The gateway ignores the client-side placeholder key when forwarding upstream. It uses `GATEWAY_UPSTREAM_API_KEY` for DeepSeek.
 
-- `GET /health`
-- `GET /v1/models`
-- `POST /v1/messages`
-- `POST /v1/messages/count_tokens`
+## Environment Variables
 
-## 限制
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `GATEWAY_UPSTREAM_BASE_URL` | Yes | none | DeepSeek Anthropic-compatible base URL |
+| `GATEWAY_UPSTREAM_API_KEY` | Yes | none | DeepSeek API key |
+| `GATEWAY_LISTEN_HOST` | No | `127.0.0.1` | Local bind host |
+| `GATEWAY_LISTEN_PORT` | No | `8088` | Local bind port |
+| `GATEWAY_UPSTREAM_TIMEOUT_SECONDS` | No | `30` | Upstream timeout |
+| `GATEWAY_FORCE_EFFORT` | No | `max` | Value written into request body |
+| `GATEWAY_MODEL_MAP_JSON` | No | built-in map | Extra or overriding model map entries |
+| `GATEWAY_LOG_FILE` | No | `~/Library/Logs/Claude-3p/deepseek-gateway.log` | Redacted gateway log path |
 
-- 这是最小代理，只处理你当前需要的路径
-- 未实现 SSE 流式转发的特殊边界测试
-- 未做认证/ACL，默认只建议本机监听
+Example custom model map:
+
+```bash
+export GATEWAY_MODEL_MAP_JSON='{"my-claude-route":"deepseek-v4-flash"}'
+```
+
+## Logs
+
+Tail the live gateway log:
+
+```bash
+tail -f "$HOME/Library/Logs/Claude-3p/deepseek-gateway.log"
+```
+
+Example request-end event:
+
+```json
+{"ts":"2026-05-06T04:55:20.123Z","event":"request_end","request_id":"...","method":"POST","path":"/v1/messages","status":200,"duration_ms":6123,"client_model":"claude-opus-4-7","upstream_model":"deepseek-v4-pro[1m]","forced_effort":"max"}
+```
+
+The log records:
+
+- HTTP method and path
+- Claude-facing model name
+- DeepSeek upstream model name
+- Forced effort value
+- Response status
+- Duration in milliseconds
+- Error category and upstream error, when available
+
+The log does not record:
+
+- User prompts
+- Message content
+- API keys
+- Authorization headers
+
+## Supported Endpoints
+
+| Method | Path | Behavior |
+| --- | --- | --- |
+| `GET` | `/health` | Local health check |
+| `GET` | `/v1/models` | Returns Claude-facing model IDs |
+| `POST` | `/v1/messages` | Rewrites model and forwards upstream |
+| `POST` | `/v1/messages/count_tokens` | Rewrites model and forwards upstream |
+
+## Troubleshooting
+
+### Claude spins forever
+
+Check whether the gateway is alive:
+
+```bash
+curl http://127.0.0.1:8088/health
+```
+
+Then watch both logs:
+
+```bash
+tail -f "$HOME/Library/Logs/Claude-3p/deepseek-gateway.log"
+tail -f "$HOME/Library/Logs/Claude-3p/main.log"
+```
+
+### DeepSeek does not show any request
+
+Look for a gateway error before blaming the upstream provider. A common local failure is Python TLS verification:
+
+```text
+CERTIFICATE_VERIFY_FAILED
+```
+
+If `curl https://api.deepseek.com` works but Python fails, your Python CA bundle may need to be installed or refreshed.
+
+### Claude says it is Opus
+
+Expected. The client-facing model route is Claude-like by design. The upstream model used by DeepSeek is visible in the gateway log as `upstream_model`.
+
+## Security Notes
+
+- Bind to `127.0.0.1` unless you know exactly why you need another host.
+- Do not commit real API keys.
+- Keep `GATEWAY_UPSTREAM_API_KEY` in your shell environment or a local ignored env file.
+- The default logger is intentionally redacted.
+
+## Tests
+
+Run:
+
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+The tests cover:
+
+- Model discovery
+- Query-string handling for `/v1/models`
+- Model rewriting
+- `effort=max`
+- Upstream authorization forwarding
+- Unsupported model rejection
+- Redacted logging
+
+## Limitations
+
+- This is a focused local gateway, not a general-purpose reverse proxy.
+- It only handles the endpoints listed above.
+- SSE streaming passthrough has not been deeply optimized yet.
+- There is no built-in auth or ACL layer. Localhost is the intended boundary.
+
+## License
+
+No license has been selected yet. Treat this as all rights reserved until a license file is added.
