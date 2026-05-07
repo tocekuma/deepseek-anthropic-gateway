@@ -90,6 +90,7 @@ class GatewayTests(unittest.TestCase):
                 "claude-sonnet-4-5": "deepseek-v4-flash",
                 "anthropic/claude-sonnet-4-5": "deepseek-v4-flash",
                 "sonnet-4.5": "deepseek-v4-flash",
+                "claude-haiku-4-5-20251001": "deepseek-v4-flash",
             },
             forced_effort="max",
             upstream_timeout_seconds=5,
@@ -123,6 +124,7 @@ class GatewayTests(unittest.TestCase):
                 "claude-sonnet-4-5",
                 "anthropic/claude-sonnet-4-5",
                 "sonnet-4.5",
+                "claude-haiku-4-5-20251001",
             ],
         )
         self.assertEqual(self.upstream.requests, [])
@@ -222,6 +224,40 @@ class GatewayTests(unittest.TestCase):
 
         forwarded_payload = json.loads(self.upstream.requests[0]["body"].decode("utf-8"))
         self.assertEqual(forwarded_payload["model"], "deepseek-v4-flash")
+
+    def test_unknown_sonnet_or_haiku_routes_default_to_flash(self):
+        for model_name in ("claude-sonnet-4-5-20251001", "claude-haiku-4-5-20251001"):
+            body = {"model": model_name, "messages": []}
+            req = request.Request(
+                f"{self.gateway_base}/v1/messages",
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+
+            request.urlopen(req, timeout=5).read()
+
+        forwarded_payloads = [
+            json.loads(item["body"].decode("utf-8")) for item in self.upstream.requests[-2:]
+        ]
+        self.assertEqual(
+            [item["model"] for item in forwarded_payloads],
+            ["deepseek-v4-flash", "deepseek-v4-flash"],
+        )
+
+    def test_unknown_opus_routes_default_to_pro(self):
+        body = {"model": "claude-opus-4-7-20251001", "messages": []}
+        req = request.Request(
+            f"{self.gateway_base}/v1/messages",
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        request.urlopen(req, timeout=5).read()
+
+        forwarded_payload = json.loads(self.upstream.requests[-1]["body"].decode("utf-8"))
+        self.assertEqual(forwarded_payload["model"], "deepseek-v4-pro[1m]")
 
     def test_unknown_model_returns_400_before_upstream(self):
         body = {"model": "deepseek-v4-pro", "messages": []}

@@ -23,8 +23,11 @@ DEFAULT_MODEL_MAP = {
     "claude-sonnet-4-5": "deepseek-v4-flash",
     "anthropic/claude-sonnet-4-5": "deepseek-v4-flash",
     "sonnet-4.5": "deepseek-v4-flash",
+    "claude-haiku-4-5-20251001": "deepseek-v4-flash",
 }
 
+DEFAULT_PRO_MODEL = "deepseek-v4-pro[1m]"
+DEFAULT_FLASH_MODEL = "deepseek-v4-flash"
 DEFAULT_LOG_FILE = Path.home() / "Library/Logs/Claude-3p/deepseek-gateway.log"
 _LOG_LOCK = threading.Lock()
 
@@ -126,7 +129,7 @@ def create_handler(config: GatewayConfig):
 
             payload = _read_json(self)
             client_model = payload.get("model")
-            upstream_model = config.model_map.get(client_model)
+            upstream_model = _resolve_upstream_model(config.model_map, client_model)
             if upstream_model is None:
                 self._log_event(
                     event="request_end",
@@ -289,6 +292,23 @@ def _models_payload(model_map: dict[str, str]) -> dict[str, Any]:
             }
         )
     return {"object": "list", "data": data}
+
+
+def _resolve_upstream_model(model_map: dict[str, str], client_model: Any) -> str | None:
+    if not isinstance(client_model, str):
+        return None
+
+    exact_match = model_map.get(client_model)
+    if exact_match:
+        return exact_match
+
+    normalized_model = client_model.lower()
+    if "opus" in normalized_model:
+        return DEFAULT_PRO_MODEL
+    if "sonnet" in normalized_model or "haiku" in normalized_model:
+        return DEFAULT_FLASH_MODEL
+
+    return None
 
 
 def run_server(config: GatewayConfig) -> None:

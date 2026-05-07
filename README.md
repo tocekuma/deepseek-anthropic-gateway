@@ -27,6 +27,15 @@ This gateway sits in the middle and says:
 | `claude-sonnet-4-5` | `deepseek-v4-flash` |
 | `anthropic/claude-sonnet-4-5` | `deepseek-v4-flash` |
 | `sonnet-4.5` | `deepseek-v4-flash` |
+| `claude-haiku-4-5-20251001` | `deepseek-v4-flash` |
+
+For model names not listed above, the gateway also applies family defaults:
+
+| Client model contains | Upstream model |
+| --- | --- |
+| `opus` | `deepseek-v4-pro[1m]` |
+| `sonnet` | `deepseek-v4-flash` |
+| `haiku` | `deepseek-v4-flash` |
 
 It also overwrites any incoming `effort` value with:
 
@@ -103,6 +112,9 @@ Point your Claude Desktop 3P / gateway config at the local server:
     },
     {
       "name": "claude-sonnet-4-5"
+    },
+    {
+      "name": "claude-haiku-4-5-20251001"
     }
   ]
 }
@@ -220,6 +232,7 @@ The tests cover:
 - Model discovery
 - Query-string handling for `/v1/models`
 - Model rewriting
+- Family defaults for `opus`, `sonnet`, and `haiku`
 - `effort=max`
 - Upstream authorization forwarding
 - Unsupported model rejection
